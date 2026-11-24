@@ -1,7 +1,7 @@
 # Clickstream Lakehouse
 
 A real-time e-commerce clickstream pipeline built end to end on an open-source modern data stack, running locally with Docker.
-It goes from simulated user clicks to tested, business-ready tables. The design choices are the ones product companies make at scale: Kafka, Spark Structured Streaming, Apache Iceberg, dbt, Trino and Airflow.
+It goes from simulated user clicks to tested, business-ready tables. The design choices are the ones ompanies make at scale: Kafka, Spark Structured Streaming, Apache Iceberg, dbt, Trino and Airflow.
 
 ```mermaid
 flowchart LR
