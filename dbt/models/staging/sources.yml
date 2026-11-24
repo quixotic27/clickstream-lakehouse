@@ -1,0 +1,16 @@
+version: 2
+
+sources:
+  - name: bronze
+    description: Raw clickstream written by the Spark streaming job (stream_bronze.py)
+    database: lake
+    schema: bronze
+    loaded_at_field: ingested_at          # used by `dbt source freshness`
+    freshness:
+      warn_after: {count: 5, period: minute}
+      error_after: {count: 15, period: minute}
+    tables:
+      - name: events
+        description: One row per valid Kafka message. Duplicates are kept on purpose.
+      - name: events_dlq
+        description: Messages that failed the event contract, with error_reason.

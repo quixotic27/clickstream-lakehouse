@@ -1,0 +1,13 @@
+clickstream:
+  target: local
+  outputs:
+    local:
+      type: trino
+      method: none                 # no auth locally
+      user: dbt
+      host: "{{ env_var('TRINO_HOST', 'localhost') }}"
+      port: 8080
+      http_scheme: http
+      database: lake               # Trino catalog = our Iceberg catalog
+      schema: silver               # default schema
+      threads: 4

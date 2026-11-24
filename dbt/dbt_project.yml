@@ -1,0 +1,19 @@
+name: clickstream
+version: "1.0.0"
+profile: clickstream
+
+model-paths: ["models"]
+macro-paths: ["macros"]
+test-paths: ["tests"]
+target-path: target
+clean-targets: [target, dbt_packages]
+
+models:
+  clickstream:
+    +materialized: table          # Iceberg tables (Parquet files in MinIO)
+    staging:
+      +schema: silver
+    intermediate:
+      +schema: silver
+    marts:
+      +schema: gold
