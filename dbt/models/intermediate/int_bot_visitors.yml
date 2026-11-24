@@ -1,0 +1,11 @@
+version: 2
+
+models:
+  - name: int_bot_visitors
+    description: One row per device (anonymous_id) with bot signals. Grain = anonymous_id.
+    columns:
+      - name: anonymous_id
+        data_tests: [unique, not_null]
+      - name: is_bot
+        description: True if the device declares itself a bot OR clicks faster than a human could.
+        data_tests: [not_null]

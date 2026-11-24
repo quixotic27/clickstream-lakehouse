@@ -1,0 +1,16 @@
+version: 2
+
+models:
+  - name: int_sessionized_events
+    description: >
+      Human (non-bot) clicks labelled with a session_id. A new session starts after
+      30 minutes of inactivity on the same device. Grain = event_id.
+    columns:
+      - name: event_id
+        data_tests: [unique, not_null]
+      - name: session_id
+        description: anonymous_id + '-' + session number on that device.
+        data_tests: [not_null]
+      - name: event_seq_in_session
+        description: 1 for the first click of a session (the landing page), 2, 3, ...
+        data_tests: [not_null]
