@@ -88,10 +88,25 @@ services:
         echo "bucket ready"
     restart: "no"
 
+
+    # PostgreSQL: the Iceberg catalog's own database (handles many concurrent writers, unlike SQLite)
+  catalog-db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: iceberg
+      POSTGRES_PASSWORD: iceberg
+      POSTGRES_DB: iceberg_catalog
+    volumes:
+      - catalog-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U iceberg -d iceberg_catalog"]
+      interval: 5s
+      retries: 20
+
   # Iceberg REST catalog: keeps track of which tables exist and where their metadata is
+    # Iceberg REST catalog: keeps track of which tables exist and where their metadata is
   iceberg-rest:
     image: tabulario/iceberg-rest:1.6.0
-    user: root                                   # so it can write its database file to the volume
     environment:
       AWS_ACCESS_KEY_ID: admin
       AWS_SECRET_ACCESS_KEY: password
@@ -100,12 +115,14 @@ services:
       CATALOG_IO__IMPL: org.apache.iceberg.aws.s3.S3FileIO
       CATALOG_S3_ENDPOINT: http://minio:9000
       CATALOG_S3_PATH__STYLE__ACCESS: "true"
-      CATALOG_URI: jdbc:sqlite:/catalog/iceberg_catalog.db   # persist the catalog (default is in-memory)
+      CATALOG_URI: jdbc:postgresql://catalog-db:5432/iceberg_catalog   # Postgres instead of SQLite
+      CATALOG_JDBC_USER: iceberg
+      CATALOG_JDBC_PASSWORD: iceberg
     ports:
       - "8181:8181"
-    volumes:
-      - iceberg-catalog:/catalog
     depends_on:
+      catalog-db:
+        condition: service_healthy
       minio-init:
         condition: service_completed_successfully
 
@@ -146,8 +163,34 @@ services:
         condition: service_started
     restart: unless-stopped
 
+    # Kafka -> per-minute live metrics (speed layer). Spark UI: http://localhost:4041
+  spark-live-metrics:
+    build: ./spark
+    environment:
+      AWS_ACCESS_KEY_ID: admin
+      AWS_SECRET_ACCESS_KEY: password
+      AWS_REGION: us-east-1
+      KAFKA_BOOTSTRAP: redpanda:9092
+      TRIGGER_INTERVAL: 30 seconds
+      LIVE_WATERMARK: 2 minutes
+    command:
+      - /opt/spark/bin/spark-submit
+      - --properties-file
+      - /opt/app/conf/spark-defaults.conf
+      - /opt/app/jobs/stream_live_metrics.py
+    ports:
+      - "4041:4040"
+    volumes:
+      - spark-checkpoints:/opt/checkpoints
+    depends_on:
+      redpanda:
+        condition: service_healthy
+      iceberg-rest:
+        condition: service_started
+    restart: unless-stopped
+
 volumes:
   redpanda-data:
   minio-data:
-  iceberg-catalog:
+  catalog-db-data:
   spark-checkpoints:
