@@ -1,0 +1,125 @@
+# Clickstream lakehouse: local infrastructure
+# Step 2: Kafka (Redpanda)   Step 3: MinIO + Iceberg REST catalog + Trino
+name: clickstream-lakehouse
+
+services:
+  redpanda:
+    image: redpandadata/redpanda:v24.2.7
+    command:
+      - redpanda start
+      - --smp 1                      # 1 CPU core
+      - --memory 1G
+      - --overprovisioned            # laptop mode
+      - --mode dev-container
+      # two listeners: one for containers (redpanda:9092), one for your Mac (localhost:19092)
+      - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr internal://redpanda:9092,external://localhost:19092
+    ports:
+      - "19092:19092"
+    volumes:
+      - redpanda-data:/var/lib/redpanda/data
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -q 'Healthy:.*true'"]
+      interval: 5s
+      retries: 20
+
+  # one-shot job: creates the topic, then exits
+  redpanda-init:
+    image: redpandadata/redpanda:v24.2.7
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >
+        rpk topic create clickstream.events
+        --partitions 6 --replicas 1
+        --topic-config retention.ms=604800000
+        -X brokers=redpanda:9092 || true
+    restart: "no"
+
+  # web UI to browse topics and messages: http://localhost:8088
+  redpanda-console:
+    image: redpandadata/console:v2.7.2
+    environment:
+      KAFKA_BROKERS: redpanda:9092
+    ports:
+      - "8088:8080"
+    depends_on:
+      redpanda:
+        condition: service_healthy
+
+  # ============================================================ STEP 3: LAKEHOUSE STORAGE
+
+  # S3-compatible object storage: where the actual data files (Parquet) live
+  # API: localhost:9000   Web console: http://localhost:9001 (admin / password)
+    # S3-compatible object storage: where the actual data files (Parquet) live
+  # API: localhost:9000   Web console: http://localhost:9001 (admin / password)
+  # NOTE: MinIO removed its official images from Docker Hub in Sept 2026,
+  #       so we use Chainguard's maintained build of the same MinIO server.
+  minio:
+    image: cgr.dev/chainguard/minio:latest
+    user: root                                   # avoid volume permission errors locally
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: admin
+      MINIO_ROOT_PASSWORD: password
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+
+  # one-shot job: waits for MinIO, creates the "warehouse" bucket, then exits
+  minio-init:
+    image: amazon/aws-cli:2.22.35
+    depends_on:
+      - minio
+    environment:
+      AWS_ACCESS_KEY_ID: admin
+      AWS_SECRET_ACCESS_KEY: password
+      AWS_REGION: us-east-1
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >
+        until aws --endpoint-url http://minio:9000 s3 ls > /dev/null 2>&1;
+        do echo "waiting for minio..."; sleep 2; done;
+        aws --endpoint-url http://minio:9000 s3 mb s3://warehouse || true;
+        echo "bucket ready"
+    restart: "no"
+
+  # Iceberg REST catalog: keeps track of which tables exist and where their metadata is
+  iceberg-rest:
+    image: tabulario/iceberg-rest:1.6.0
+    user: root                                   # so it can write its database file to the volume
+    environment:
+      AWS_ACCESS_KEY_ID: admin
+      AWS_SECRET_ACCESS_KEY: password
+      AWS_REGION: us-east-1
+      CATALOG_WAREHOUSE: s3://warehouse/
+      CATALOG_IO__IMPL: org.apache.iceberg.aws.s3.S3FileIO
+      CATALOG_S3_ENDPOINT: http://minio:9000
+      CATALOG_S3_PATH__STYLE__ACCESS: "true"
+      CATALOG_URI: jdbc:sqlite:/catalog/iceberg_catalog.db   # persist the catalog (default is in-memory)
+    ports:
+      - "8181:8181"
+    volumes:
+      - iceberg-catalog:/catalog
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
+
+  # SQL query engine: reads/writes Iceberg tables. UI: http://localhost:8080
+  trino:
+    image: trinodb/trino:460
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./trino/catalog/lake.properties:/etc/trino/catalog/lake.properties:ro
+    depends_on:
+      - iceberg-rest
+
+volumes:
+  redpanda-data:
+  minio-data:
+  iceberg-catalog:
