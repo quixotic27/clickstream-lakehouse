@@ -189,8 +189,48 @@ services:
         condition: service_started
     restart: unless-stopped
 
+    # ============================================================ STEP 8: ORCHESTRATION
+
+  # Airflow's own database (DAG runs, task history)
+  airflow-db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - airflow-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U airflow -d airflow"]
+      interval: 5s
+      retries: 20
+
+  # Airflow 3 in standalone mode (scheduler + API/UI + DAG processor + triggerer in one container)
+  # UI: http://localhost:8090
+  airflow:
+    build: ./airflow
+    command: standalone
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-db:5432/airflow
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_ALL_ADMINS: "true"    # local only: no login screen
+      AIRFLOW__DAG_PROCESSOR__REFRESH_INTERVAL: "30"           # pick up new/changed DAG files quickly
+      TRINO_HOST: trino                                        # dbt + maintenance talk to Trino inside Docker
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./dbt:/opt/airflow/dbt
+    ports:
+      - "8090:8080"
+    depends_on:
+      airflow-db:
+        condition: service_healthy
+      trino:
+        condition: service_started
+
 volumes:
   redpanda-data:
   minio-data:
   catalog-db-data:
   spark-checkpoints:
+  airflow-db-data:
