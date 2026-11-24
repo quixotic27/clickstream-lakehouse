@@ -1,8 +1,10 @@
 # Clickstream lakehouse: local infrastructure
-# Step 2: Kafka (Redpanda)   Step 3: MinIO + Iceberg REST catalog + Trino
+# Step 2: Kafka (Redpanda)   Step 3: MinIO + Iceberg REST catalog + Trino   Step 4: Spark
 name: clickstream-lakehouse
 
 services:
+  # ============================================================ STEP 2: KAFKA
+
   redpanda:
     image: redpandadata/redpanda:v24.2.7
     command:
@@ -52,8 +54,6 @@ services:
   # ============================================================ STEP 3: LAKEHOUSE STORAGE
 
   # S3-compatible object storage: where the actual data files (Parquet) live
-  # API: localhost:9000   Web console: http://localhost:9001 (admin / password)
-    # S3-compatible object storage: where the actual data files (Parquet) live
   # API: localhost:9000   Web console: http://localhost:9001 (admin / password)
   # NOTE: MinIO removed its official images from Docker Hub in Sept 2026,
   #       so we use Chainguard's maintained build of the same MinIO server.
@@ -119,7 +119,35 @@ services:
     depends_on:
       - iceberg-rest
 
+  # ============================================================ STEP 4: SPARK STREAMING
+
+  # Kafka -> Iceberg bronze (+ dead-letter table). Spark UI: http://localhost:4040
+  spark-bronze:
+    build: ./spark
+    environment:
+      AWS_ACCESS_KEY_ID: admin
+      AWS_SECRET_ACCESS_KEY: password
+      AWS_REGION: us-east-1
+      KAFKA_BOOTSTRAP: redpanda:9092
+      TRIGGER_INTERVAL: 30 seconds
+    command:
+      - /opt/spark/bin/spark-submit
+      - --properties-file
+      - /opt/app/conf/spark-defaults.conf
+      - /opt/app/jobs/stream_bronze.py
+    ports:
+      - "4040:4040"
+    volumes:
+      - spark-checkpoints:/opt/checkpoints
+    depends_on:
+      redpanda:
+        condition: service_healthy
+      iceberg-rest:
+        condition: service_started
+    restart: unless-stopped
+
 volumes:
   redpanda-data:
   minio-data:
   iceberg-catalog:
+  spark-checkpoints:
