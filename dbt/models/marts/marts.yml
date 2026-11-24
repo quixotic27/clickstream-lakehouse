@@ -1,0 +1,34 @@
+version: 2
+
+models:
+  - name: fct_sessions
+    description: One row per visit. Grain = session_id.
+    columns:
+      - name: session_id
+        data_tests: [unique, not_null]
+      - name: channel
+        description: utm_source of the first click, or 'direct'.
+        data_tests: [not_null]
+      - name: revenue
+        data_tests: [not_null]
+
+  - name: fct_funnel_daily
+    description: Conversion funnel per day and device. Grain = session_date + device.
+    data_tests:
+      - unique_combination_of_columns:
+          arguments:
+            columns: [session_date, device]
+
+  - name: fct_product_daily
+    description: Product views, add-to-carts, units sold and revenue. Grain = event_date + product_id.
+    data_tests:
+      - unique_combination_of_columns:
+          arguments:
+            columns: [event_date, product_id]
+
+  - name: fct_traffic_daily
+    description: Sessions, bounce, conversion and revenue by channel and campaign. Grain = session_date + channel + campaign.
+    data_tests:
+      - unique_combination_of_columns:
+          arguments:
+            columns: [session_date, channel, campaign]
